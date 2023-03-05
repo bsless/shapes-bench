@@ -1,11 +1,13 @@
 (ns bsless.shapes-bench
   (:require
    [criterium.core :as cc]
-   [clj-async-profiler.core :as prof])
+   #_[clj-async-profiler.core :as prof])
   (:import
    (java.lang Math)))
 
 (set! *unchecked-math* true)
+
+(println *compiler-options*)
 
 (defmacro bench [body]
   `(let [ret# (cc/quick-benchmark ~body {})
@@ -13,6 +15,7 @@
          mean# (first est#)
          [factor# unit#] (cc/scale-time mean#)]
      (cc/report-result ret#)
+     (println "\n\n")
      [mean# (cc/format-value mean# factor# unit#)]))
 
 (defn make-circle [n] {:type :circle :radius (rand n)})
@@ -24,7 +27,7 @@
 
 (defn random-shape [n] ((rand-nth makers) n))
 
-(defonce shapes (into [] (repeatedly (int 1e5) #(random-shape 10))))
+(defonce shapes (into [] (repeatedly (int 4e5) #(random-shape 10))))
 
 (defn circle-area [{:keys [radius]}] (* Math/PI radius radius))
 (defn square-area [{:keys [side]}] (* side side))
@@ -32,24 +35,49 @@
 (defn triangle-area [{:keys [width height]}] (* 0.5 width height))
 
 (defn shape-area-case [{:keys [type] :as shape}]
-  ((case type
-     :circle circle-area
-     :square square-area
-     :rectangle rectangle-area
-     :triangle triangle-area)
-   shape))
+  (case type
+    :circle (circle-area shape)
+    :square (square-area shape)
+    :rectangle (rectangle-area shape)
+    :triangle (triangle-area shape)))
 
 
 (defn total-area-case-transduce
   [shapes]
   (transduce (map shape-area-case) + 0 shapes))
 
-(comment
-  (bench (total-area-case-transduce shapes))
-  ;; => [0.007121097388888889 "7.121097 ms"]
-  ;; => [0.006868884777777778 "6.868885 ms"]
-  ;; => [0.006944577633333333 "6.944578 ms"]
-  )
+(comment)
+(println "Case + transduce")
+(bench (total-area-case-transduce shapes))
+;; => [0.028277429083333333 "28.277429 ms"]
+
+(defn prim-circle-area ^double [shape] (let [radius (unchecked-double (:radius shape))] (* Math/PI radius radius)))
+(defn prim-square-area ^double [shape] (let [side (unchecked-double (:side shape))] (* side side)))
+(defn prim-rectangle-area ^double [shape] (* ^double (:width shape) ^double (:height shape)))
+(defn prim-triangle-area ^double [shape] (* 0.5 ^double (:width shape) ^double (:height shape)))
+
+(defn prim-shape-area-case ^double [shape]
+  (case (:type shape)
+    :circle (prim-circle-area shape)
+    :square (prim-square-area shape)
+    :rectangle (prim-rectangle-area shape)
+    :triangle (prim-triangle-area shape)))
+
+(defn prim-total-area-case-reduce
+  [shapes]
+  (reduce (fn ^double [^double acc shape] (+ acc (prim-shape-area-case shape))) 0 shapes))
+
+(defn prim-total-area-case-transduce
+  [shapes]
+  (transduce (map prim-shape-area-case) + 0 shapes))
+
+(println "Case + prims + transduce")
+(bench (prim-total-area-case-transduce shapes))
+;; => [0.0168039305 "16.803931 ms"]
+
+(println "Case + prims + reduce")
+(bench (prim-total-area-case-reduce shapes))
+;; => [0.013422389958333334 "13.422390 ms"]
 
 (defmulti shape-area-multi :type)
 (defmethod shape-area-multi :circle [o] (circle-area o))
@@ -61,12 +89,9 @@
   [shapes]
   (transduce (map shape-area-multi) + 0 shapes))
 
-(total-area-multi-transduce shapes)
-;; => 4388931.373489026
-(comment
-  (bench (total-area-multi-transduce shapes))
-  ;; => [0.006816581177777778 "6.816581 ms"]
-  )
+(println "multimethod + transduce")
+(bench (total-area-multi-transduce shapes))
+;; => [0.030941701208333335 "30.941701 ms"]
 
 (defonce shapes-factors
   (into
@@ -90,10 +115,9 @@
 
 (total-area-factor-transduce shapes-factors)
 
-(comment
-  (bench (total-area-factor-transduce shapes-factors))
-  ;; => [0.003435118416666667 "3.435118 ms"]
-  )
+(println "factor + transduce")
+(bench (total-area-factor-transduce shapes-factors))
+;; => [0.0138719610625 "13.871961 ms"]
 
 (defprotocol PArea
   (-area [shape]))
@@ -120,16 +144,16 @@
   (transduce (map -area) + 0 shapes))
 
 
-(comment (bench (total-area-protocol-transduce precord-shapes)))
-;; => [0.0033820822258064523 "3.382082 ms"]
-
+(println "protocol + transduce")
+(bench (total-area-protocol-transduce precord-shapes))
+;; => [0.012866039729166667 "12.866040 ms"]
 (defrecord Shape [factor width height])
 
 (defonce record-shapes-factors (into [] (map map->Shape) shapes-factors))
 
+(println "shape record + kw access + transduce")
 (bench (total-area-factor-transduce record-shapes-factors))
-;; => [0.0025976192083333335 "2.597619 ms"]
-
+;; => [0.016156389 "16.156389 ms"]
 (defn record-shape-area [^Shape shape]
   (* (.factor shape) (.width shape) (.height shape)))
 
@@ -137,9 +161,9 @@
   [shapes]
   (transduce (map record-shape-area) + 0 shapes))
 
+(println "shape record + member access + transduce")
 (bench (total-area-record-transduce record-shapes-factors))
-;; => [0.0021780838537414967 "2.178084 ms"];; => [0.002310101343537415 "2.310101 ms"]
-
+;; => [0.0130048725 "13.004873 ms"]
 (definterface IPrimShape
   (^double getArea []))
 
@@ -157,8 +181,17 @@
   [shapes]
   (transduce (map prim-record-shape-area) + 0 shapes))
 
+(println "prim shape record + member access + transduce")
 (bench (total-area-prim-record record-prim-shapes-factors))
-;; => [0.0014644022083333333 "1.464402 ms"]
+;; => [0.004860275587301587 "4.860276 ms"]
+
+(defn total-area-prim-record-reduce
+  [shapes]
+  (reduce (fn ^double [^double acc shape] (+ acc (prim-record-shape-area shape))) 0 shapes))
+
+(println "prim shape record + member access + reduce")
+(bench (total-area-prim-record-reduce record-prim-shapes-factors))
+;; => [0.002313144886524823 "2.313145 ms"]
 
 (defn get-area ^double [^IPrimShape shape]
   (.getArea shape))
@@ -166,8 +199,17 @@
 (defn total-area-prim-record-method [shapes]
   (transduce (map get-area) + 0 shapes))
 
+(println "prim shape record + interface call + transduce")
 (bench (total-area-prim-record-method record-prim-shapes-factors))
-;; => [0.001462911894607843 "1.462912 ms"]
+;; => [0.004738504543478262 "4.738505 ms"]
+
+(defn total-area-prim-record-method-reduce
+  [shapes]
+  (reduce (fn ^double [^double acc shape] (+ acc (get-area shape))) 0 shapes))
+
+(println "prim shape record + interface call + reduce")
+(bench (total-area-prim-record-method-reduce record-prim-shapes-factors))
+;; => [0.002061013670068027 "2.061014 ms"]
 
 (import java.util.Iterator)
 
@@ -179,8 +221,9 @@
         (recur (unchecked-add sum (prim-record-shape-area (.next it))))
         sum))))
 
+(println "prim shape record + loop")
 (bench (total-area-prim-record-loop record-prim-shapes-factors))
-;; => [1.7373949457762558E-4 "173.739495 µs"]
+;; => [0.0011672441529411767 "1.167244 ms"]
 
 (set! *warn-on-reflection* true)
 
@@ -191,10 +234,12 @@
 (defn total-area-stream ^double [shapes]
   (.sum (.mapToDouble (.stream ^java.util.Collection shapes) df)))
 
+(println "prim shape record + stream")
 (bench (total-area-stream record-prim-shapes-factors))
-;; => [7.799451511627907E-4 "779.945151 µs"]
-
+;; => [0.003212101953125 "3.212102 ms"]
+#_
 (prof/serve-files 7777)
+#_
 (time
  (prof/profile
   (dotimes [_ 1e5]
@@ -213,9 +258,10 @@
         (recur (unchecked-add sum (prim-record-shape-area (aget ^objects shapes i)))
                (unchecked-inc i))))))
 
+(println "prim shape record + array loop")
 (bench (total-area-prim-record-loop-array record-prim-shapes-factors-array))
-;; => [9.696065559833175E-5 "96.960656 µs"]
-
+;; => [7.437256957070708E-4 "743.725696 µs"]
+#_
 (time
  (prof/profile
   (dotimes [_ 1e5]
@@ -243,5 +289,6 @@
 
 (def type-prim-shapes-factors-arr (into-array PrimShapeType type-prim-shapes-factors))
 
+(println "prim shape type + array loop")
 (bench (total-area-prim-type-loop-array type-prim-shapes-factors-arr))
-;; => [8.878409546783626E-5 "88.784095 µs"]
+;; => [4.1439404928664074E-4 "414.394049 µs"]
