@@ -1,0 +1,5 @@
+{:paths ["src"]
+ :deps  {criterium/criterium {:mvn/version "0.4.6"}
+         com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.3"}}
+ :aliases 
+ {:neil {:project {:name io.github.bsless/shapes-bench}}}}
