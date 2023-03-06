@@ -1,5 +1,9 @@
 {:paths ["src"]
- :deps  {criterium/criterium {:mvn/version "0.4.6"}
-         com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.3"}}
- :aliases 
- {:neil {:project {:name io.github.bsless/shapes-bench}}}}
+ :deps  {criterium/criterium {:mvn/version "0.4.6"}}
+ :aliases
+ {:bench-all {:exec-fn bsless.shapes-bench/bench-all}
+  :dev {:extra-paths ["notebooks"]
+        :extra-deps {com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.3"}
+                     nextjournal/clerk {:git/url "https://github.com/nextjournal/clerk"
+                                        :git/sha "fda4c45049a92cbdaa8dbcdfcdc3a75e381d1b48"}}}
+  :neil {:project {:name io.github.bsless/shapes-bench}}}}
